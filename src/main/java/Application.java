@@ -14,7 +14,7 @@ public class Application {
 
         try {
             HDFSClient hdfsClient = new HDFSClient();
-            hdfsClient.dirContent("ipinyou.contest.dataset");
+            //hdfsClient.dirContent("ipinyou.contest.dataset");
 
             hdfsClient.processDirectory("ipinyou.contest.dataset");
             //hdfsClient.addFile("ipinyou.contest.dataset/bid_result.txt");
@@ -24,6 +24,6 @@ public class Application {
 
         }
         long elapsedTime = System.nanoTime() - startTime;
-        logger.info("Time spent {} nanoseconds", elapsedTime);
+        logger.info("Time spent {} seconds", elapsedTime/1000000000);
     }
 }
