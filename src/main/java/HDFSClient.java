@@ -1,11 +1,11 @@
 import java.io.*;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.codepoetics.protonpack.maps.MapStream;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.*;
 
@@ -25,7 +25,8 @@ public class HDFSClient {
     final static String HADOOP_CONF_PATH = "/Users/user/bigData/hadoop-2.7.1/etc/hadoop/";
     FileSystem fileSystem;
     Configuration conf;
-    Map<String, Integer> resultMap;
+    Map <String, Map<String, Integer> > resultMap;
+    List<String> listOfIDs;
 
     public static void setLogger(Logger logger) {
         HDFSClient.logger = logger;
@@ -44,7 +45,8 @@ public class HDFSClient {
         logger.info("HDFSClient()");
         logger.info(fileSystem.toString());
 
-        resultMap = new HashMap<>();
+        resultMap = new TreeMap<>();
+        listOfIDs = new LinkedList<>();
 
     }
 
@@ -93,9 +95,51 @@ public class HDFSClient {
 // Create a new file and write data to it.
         FSDataOutputStream out = fileSystem.create(path);
         BufferedWriter br = new BufferedWriter( new OutputStreamWriter( out, "UTF-8" ) );
+       /* resultMap = listOfIDs.stream()
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+        */
 
-        resultMap.entrySet().stream()
-                .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
+/*
+        Map<String, Integer> mx = Stream.of(m1, m2)
+                .map(Map::entrySet)          // converts each map into an entry set
+                .flatMap(Collection::stream) // converts each set into an entry stream, then
+                        // "concatenates" it in place of the original set
+                .collect(
+                        Collectors.toMap(        // collects into a map
+                                Map.Entry::getKey,   // where each entry is based
+                                Map.Entry::getValue, // on the entries in the stream
+                                Integer::max         // such that if a value already exist for
+                                // a given key, the max of the old
+                                // and new value is taken
+                        )
+                )
+                ;
+                */
+            Map<String, Integer> mx = resultMap.get("hdfs://localhost:9000/user/user/ipinyou.contest.dataset/bid.20130606.txt");
+             mx = MapStream.ofMaps(
+                    mx,
+                    resultMap.get("hdfs://localhost:9000/user/user/ipinyou.contest.dataset/bid.20130607.txt"))
+                    .mergeKeys(Integer::sum).collect();
+
+        mx = MapStream.ofMaps(
+                mx,
+                resultMap.get("hdfs://localhost:9000/user/user/ipinyou.contest.dataset/bid.20130608.txt"))
+                .mergeKeys(Integer::sum).collect();
+        mx = MapStream.ofMaps(
+                mx,
+                resultMap.get("hdfs://localhost:9000/user/user/ipinyou.contest.dataset/bid.20130609.txt"))
+                .mergeKeys(Integer::sum).collect();
+        mx = MapStream.ofMaps(
+                mx,
+                resultMap.get("hdfs://localhost:9000/user/user/ipinyou.contest.dataset/bid.20130607.txt"))
+                .mergeKeys(Integer::sum).collect();
+        mx = MapStream.ofMaps(
+                mx,
+                resultMap.get("hdfs://localhost:9000/user/user/ipinyou.contest.dataset/bid.20130607.txt"))
+                .mergeKeys(Integer::sum).collect();
+
+       /* resultMap.entrySet().stream()
+               // .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
                         Map.Entry::getValue,
@@ -110,7 +154,7 @@ public class HDFSClient {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                });
+                });*/
 // Close all the file descripters
         br.close();
         out.close();
@@ -132,39 +176,73 @@ public class HDFSClient {
 
     public void processDirectory(String directory) {
         try {
+            Map<String, Integer>  outMap = new HashMap<>();
+
             FileStatus[] status = fileSystem.listStatus(new Path(directory));  // you need to pass in your hdfs path
 
             for (int i=0;i<status.length;i++){
-                if (status[i].getPath().toString().compareTo("hdfs://localhost:9000/user/user/ipinyou.contest.dataset/bid.20130612.txt") != 0)
-                    continue;
+                long startTime = System.nanoTime();
 
+                logger.info("Processing {} file", status[i].getPath().toString());
+                //Map<String, Integer> fileMap = new HashMap<>();
                 BufferedReader br=new BufferedReader(new InputStreamReader(fileSystem.open(status[i].getPath())));
-                String line;
-                line=br.readLine();
+                String line = br.readLine();
                 while (line != null){
-                    processLine(line);
+
+                    String[] splittedLine = line.split("\t", 4);
+
+                    String id = splittedLine[2];
+                    //fileMap.merge(id, 1, Integer::sum);
+                    outMap.merge(id, 1, Integer::sum);
+                   /* count = fileMap.get(id);
+                    if (count == null) {
+                        //fileMap.put(id,  new AtomicInteger(1) );
+                        fileMap.put(id,  1 );
+                    }
+                    else {
+                        //count.incrementAndGet();
+                        fileMap.put(id, count + 1);
+                    }*/
                     line=br.readLine();
                 }
+                //resultMap.put(status[i].getPath().toString(), fileMap);
+                long elapsedTime = System.nanoTime() - startTime;
+
+                logger.info("FIle {} processed in {} ns.", status[i].getPath().toString(), elapsedTime);
+
             }
+            Path path = new Path(directory+"/bid_result.txt");
+            if (fileSystem.exists(path)) {
+                fileSystem.delete(path, true);
+            }
+            FSDataOutputStream out = fileSystem.create(path);
+            BufferedWriter br = new BufferedWriter( new OutputStreamWriter( out, "UTF-8" ) );
+            outMap.entrySet().stream()
+                .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (x, y) -> {
+                            throw new AssertionError();
+                        },
+                        LinkedHashMap::new
+                ))
+                .forEach((k, v) -> {
+                    try {
+                        br.write(k + "\t" + v + "\n");
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                });
+// Close all the file descripters
+            br.close();
+            out.close();
 
         }catch(Exception e){
-            System.out.println("File not found");
+            e.printStackTrace();
         }
     }
 
-    public void processLine(String line){
-        String[] splittedLine = line.split("\t", 4);
-
-        //logger.debug( "1=[{}] 2=[{}] 3=[{}] 4=[{}] ", splittedLine[0], splittedLine[1], splittedLine[2], splittedLine[3]);
-        String id = splittedLine[2];
-
-
-        Integer count = resultMap.get(id);
-        if (count == null)
-            resultMap.put(id, 1);
-        else
-            resultMap.put(id, count+1);
-    }
 
     public static void main(String[] args) throws IOException {
 
