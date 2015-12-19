@@ -124,6 +124,7 @@ public class HDFSClient {
             if (fileSystem.exists(path)) {
                 fileSystem.delete(path, true);
             }
+
             FSDataOutputStream out = fileSystem.create(path);
             BufferedWriter br = new BufferedWriter( new OutputStreamWriter( out, "UTF-8" ) );
             outMap.entrySet().stream()
