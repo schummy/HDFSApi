@@ -46,52 +46,6 @@ public class HDFSClient {
     }
 
 
-    public void readFile(String file) throws IOException {
-
-        Path path = new Path(file);
-
-        logger.info("Filesystem URI : " + fileSystem.getUri());
-        logger.info("Filesystem Home Directory : " + fileSystem.getHomeDirectory());
-        logger.info("Filesystem Working Directory : " + fileSystem.getWorkingDirectory());
-        logger.info("HDFS File Path : " + path);
-
-        if (!fileSystem.exists(path)) {
-            System.out.println("File " + file + " does not exists");
-            return;
-        }
-
-        FSDataInputStream in = fileSystem.open(path);
-
-        String filename = file.substring(file.lastIndexOf('/') + 1,
-                file.length());
-
-        OutputStream out = new BufferedOutputStream(new FileOutputStream(
-                new File(filename)));
-
-        byte[] b = new byte[1024];
-        int numBytes = 0;
-        while ((numBytes = in.read(b)) > 0) {
-            out.write(b, 0, numBytes);
-        }
-
-        in.close();
-        out.close();
-        fileSystem.close();
-    }
-
-
-    public void dirContent(String directory) {
-        try{
-            FileStatus[] status = fileSystem.listStatus(new Path(directory));  // you need to pass in your hdfs path
-
-            for (int i = 0; i < status.length; i++) {
-                logger.info(status[i].getPath().toString());
-
-            }
-        } catch (Exception e) {
-            System.out.println("File not found");
-        }
-    }
 
     public void processDirectory(String directory) {
         try {
@@ -99,51 +53,14 @@ public class HDFSClient {
 
             FileStatus[] status = fileSystem.listStatus(new Path(directory));  // you need to pass in your hdfs path
 
-            for (int i=0;i<status.length;i++){
-                long startTime = System.nanoTime();
-
-                logger.info("Processing {} file", status[i].getPath().toString());
-                BufferedReader br=new BufferedReader(new InputStreamReader(fileSystem.open(status[i].getPath())));
-                String line = br.readLine();
-                while (line != null){
-
-                    String[] splittedLine = line.split("\t", 4);
-           //         String id1 = line.split("\t", 4)[2];
-
-                    String id = splittedLine[2];
-                    outMap.merge(id, 1, Integer::sum);
-                    line=br.readLine();
-                }
-                long elapsedTime = System.nanoTime() - startTime;
-
-                logger.info("FIle {} processed in {} sec.", status[i].getPath().toString(), elapsedTime/1000000000);
-                logger.info("outMap has {} elements", outMap.size());
-
-            }
-            Path path = new Path(directory+"/bid_result.txt");
-            if (fileSystem.exists(path)) {
-                fileSystem.delete(path, true);
+            for ( int i = 0; i < status.length; i++ ){
+                processFile(outMap, status[i]);
             }
 
+            Path path = initOutputDir(directory);
             FSDataOutputStream out = fileSystem.create(path);
             BufferedWriter br = new BufferedWriter( new OutputStreamWriter( out, "UTF-8" ) );
-            outMap.entrySet().stream()
-                .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey,
-                        Map.Entry::getValue,
-                        (x, y) -> {
-                            throw new AssertionError();
-                        },
-                        LinkedHashMap::new
-                ))
-                .forEach((k, v) -> {
-                    try {
-                        br.write(k + "\t" + v + "\n");
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                });
+            processMap(outMap, br);
 // Close all the file descripters
             br.close();
             out.close();
@@ -153,10 +70,53 @@ public class HDFSClient {
         }
     }
 
+    private void processMap(Map<String, Integer> outMap, BufferedWriter br) {
+        outMap.entrySet().stream()
+            .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
+            .collect(Collectors.toMap(
+                    Map.Entry::getKey,
+                    Map.Entry::getValue,
+                    (x, y) -> {
+                        throw new AssertionError();
+                    },
+                    LinkedHashMap::new
+            ))
+            .forEach((k, v) -> {
+                try {
+                    br.write(k + "\t" + v + "\n");
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            });
+    }
 
-    public static void main(String[] args) throws IOException {
+    private Path initOutputDir(String directory) throws IOException {
+        Path path = new Path(directory+"/bid_result.txt");
+        if (fileSystem.exists(path)) {
+            fileSystem.delete(path, true);
+        }
+        return path;
+    }
 
-        HDFSClient client = new HDFSClient();
+    private void processFile(Map<String, Integer> outMap, FileStatus statu) throws IOException {
+        long startTime = System.nanoTime();
+
+        logger.info("Processing {} file", statu.getPath().toString());
+        BufferedReader br=new BufferedReader(new InputStreamReader(fileSystem.open(statu.getPath())));
+        String line = br.readLine();
+        while (line != null){
+
+            String[] splittedLine = line.split("\t", 4);
+   //         String id1 = line.split("\t", 4)[2];
+
+            String id = splittedLine[2];
+            outMap.merge(id, 1, Integer::sum);
+            line=br.readLine();
+        }
+        long elapsedTime = System.nanoTime() - startTime;
+
+        logger.info("FIle {} processed in {} sec.", statu.getPath().toString(), elapsedTime/1000000000);
+        logger.info("outMap has {} elements", outMap.size());
     }
 
 }
